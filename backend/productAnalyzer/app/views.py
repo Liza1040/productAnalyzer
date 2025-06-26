@@ -36,29 +36,25 @@ def product_list(request):
 
 
 proxies = {
-    'http': 'http://124.13.224.213:8080',
+    'http': 'http://182.52.17.131:8080',
+}
+
+CATEGORY_MAPPING = {
+    'здоровое питание': '10299',
+    'подарки': '130603',
+    'электроника': '12345',
 }
 
 
-
-def get_category():
-    # url = 'https://catalog.wb.ru/catalog/product5/v2/catalog?ab_testing=false&appType=1&cat=10299&curr=rub&dest=-1255987&hide_dtype=13&lang=ru&page=1&sort=popular&spp=30'
-    #
-    # headers = {
-    #     'Accept': '*/*',
-    #     'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
-    #     'Connection': 'keep-alive',
-    #     'Origin': 'https://www.wildberries.ru',
-    #     'Referer': 'https://www.wildberries.ru/catalog/pitanie/zdorovoe-pitanie',
-    #     'Sec-Fetch-Dest': 'empty',
-    #     'Sec-Fetch-Mode': 'cors',
-    #     'Sec-Fetch-Site': 'cross-site',
-    #     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36',
-    #     'sec-ch-ua': 'Google Chrome";v="111", "Not(A:Brand";v="8", "Chromium";v="111"',
-    #     'sec-ch-ua-mobile': '?0',
-    #     'sec-ch-ua-platform': 'macOS',
-    # }
-    url = 'https://catalog.wb.ru/catalog/gift11/catalog?cat=130603&limit=100&sort=popular&page=1&appType=128&curr=byn&locale=by&lang=ru&dest=-59202&regions=1,4,22,30,31,33,40,48,66,68,69,70,80,83,111,114,115&reg=1&spp=25'
+def get_category(cat_id):
+    """
+    Получает данные с Wildberries для заданной категории по идентификатору.
+    """
+    url = (
+        "https://catalog.wb.ru/catalog/gift11/catalog?"
+        "cat={cat}&limit=100&sort=popular&page=1&appType=128&curr=byn&locale=by&lang=ru&"
+        "dest=-59202&regions=1,4,22,30,31,33,40,48,66,68,69,70,80,83,111,114,115&reg=1&spp=25"
+    ).format(cat=cat_id)
 
     headers = {
         'Accept': '*/*',
@@ -69,32 +65,41 @@ def get_category():
         'Sec-Fetch-Dest': 'empty',
         'Sec-Fetch-Mode': 'cors',
         'Sec-Fetch-Site': 'cross-site',
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+                      'AppleWebKit/537.36 (KHTML, like Gecko) '
+                      'Chrome/111.0.0.0 Safari/537.36',
         'sec-ch-ua': 'Google Chrome";v="111", "Not(A:Brand";v="8", "Chromium";v="111"',
         'sec-ch-ua-mobile': '?0',
         'sec-ch-ua-platform': 'macOS',
     }
 
-    response = requests.get(url=url, headers=headers, proxies=proxies)
+    try:
+        response = requests.get(url=url, headers=headers, proxies=proxies, timeout=15)
+        response.raise_for_status()
+    except Exception as e:
+        print(f"Ошибка при запросе данных для категории {cat_id}: {e}")
+        return {}
 
     return response.json()
 
+
 def prepare_items(response):
     products = []
-
     products_raw = response.get('data', {}).get('products', None)
 
-    if products_raw != None and len(products_raw) > 0:
+    if products_raw is not None and len(products_raw) > 0:
         for product in products_raw:
-            products.append({
-                'name': product.get('name', None),
-                'price': float(product.get('priceU', None)) / 100 if product.get('priceU', None) != None else None,
-                'discount_price': float(product.get('salePriceU', None)) / 100 if product.get('salePriceU',
-                                                                                          None) != None else None,
-                'rating': product.get('rating', None),
-                'review_count': product.get('feedbacks', None),
-            })
-
+            try:
+                products.append({
+                    'name': product.get('name'),
+                    'price': float(product.get('priceU')) / 100 if product.get('priceU') else None,
+                    'discount_price': float(product.get('salePriceU')) / 100 if product.get('salePriceU') else None,
+                    'rating': product.get('rating'),
+                    'review_count': product.get('feedbacks'),
+                })
+            except Exception as e:
+                print(f"Ошибка при подготовке товара: {e}")
+                continue
     return products
 
 
@@ -102,19 +107,30 @@ def prepare_items(response):
 @api_view(['POST'])
 def parse_products(request):
     """
-    Получает POST-запрос с параметром "query" (категория или поисковый запрос).
-    Парсит данные с Wildberries и сохраняет найденные товары в базу.
+    Получает POST-запрос с параметром "query", который содержит название категории.
+    На основе словаря CATEGORY_MAPPING определяет соответствующий идентификатор категории,
+    выполняет запрос на Wildberries и сохраняет полученные товары в базу данных.
     """
     try:
         data = json.loads(request.body)
     except Exception:
         return JsonResponse({'error': 'Неверный формат данных'}, status=400)
 
-    query = data.get('query')
-    if not query:
-        return JsonResponse({'error': 'Параметр "query" обязателен'}, status=400)
+    category_name = data.get('query')
+    if not category_name:
+        return JsonResponse({'error': 'Параметр "query" обязателен и должен содержать название категории'}, status=400)
 
-    response = get_category()
+    # Приводим название категории к нижнему регистру для корректного сопоставления
+    cat_id = CATEGORY_MAPPING.get(category_name.lower())
+    if not cat_id:
+        return JsonResponse({
+            'error': f'Категория с названием "{category_name}" не найдена. Доступны следующие категории: {list(CATEGORY_MAPPING.keys())}'
+        }, status=400)
+
+    response = get_category(cat_id)
+    if not response:
+        return JsonResponse({'error': 'Не удалось получить данные с Wildberries'}, status=500)
+
     parsed_products = prepare_items(response)
     if not parsed_products:
         return JsonResponse({'error': 'Не удалось спарсить данные с Wildberries'}, status=500)

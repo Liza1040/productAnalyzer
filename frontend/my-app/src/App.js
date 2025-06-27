@@ -5,6 +5,27 @@ import Filters from './components/Filters';
 import ProductTable from './components/ProductTable';
 import Charts from './components/Charts';
 
+// Функция для сортировки товаров на стороне клиента
+const sortProducts = (data, sortOption, sortOrder) => {
+  if (!data || data.length === 0 || !sortOption) return data;
+  const sortedData = [...data].sort((a, b) => {
+    const aValue = a[sortOption];
+    const bValue = b[sortOption];
+
+    // Если значения строковые, используем localeCompare
+    if (typeof aValue === 'string' && typeof bValue === 'string') {
+      return sortOrder === 'asc'
+          ? aValue.localeCompare(bValue)
+          : bValue.localeCompare(aValue);
+    }
+
+    // Если значения числовые, выполняем арифметическую сортировку
+    return sortOrder === 'asc' ? aValue - bValue : bValue - aValue;
+  });
+
+  return sortedData;
+};
+
 const App = () => {
   const [products, setProducts] = useState([]);
   const [filters, setFilters] = useState({
@@ -17,23 +38,26 @@ const App = () => {
   const [minPrice, setMinPrice] = useState(0);
   const [maxPrice, setMaxPrice] = useState(500);
 
-  // Функция запроса данных с backend
+  // Получение данных с backend и сортировка на клиенте
   const fetchProducts = async () => {
     try {
-      // Передаем параметры фильтров и сортировки в качестве query-параметров
       const params = {
         min_price: filters.priceRange[0],
         max_price: filters.priceRange[1],
         min_rating: filters.minRating,
         min_reviews: filters.minReviews,
-        sort_by: sortOption,
-        sort_order: sortOrder,
       };
-      const response = await axios.get('/api/products', { params });
-      setProducts(response.data);
 
-      // Вычисляем реальные min и max цены для обновления слайдера
-      const prices = response.data.map(p => p.price).filter(Boolean);
+      const response = await axios.get('/api/products', { params });
+      let data = response.data;
+
+      // Сортировка товаров на стороне клиента
+      data = sortProducts(data, sortOption, sortOrder);
+
+      setProducts(data);
+
+      // Вычисление минимальной и максимальной цены для слайдера
+      const prices = data.map(item => item.price).filter(Boolean);
       if (prices.length) {
         setMinPrice(Math.min(...prices));
         setMaxPrice(Math.max(...prices));

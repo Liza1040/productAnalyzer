@@ -22,7 +22,7 @@ const Filters = ({ filters, setFilters, sortOption, setSortOption, sortOrder, se
     };
 
     return (
-        <Box sx={{ my: 2, display: 'flex', flexWrap: 'wrap', gap: 2 }}>
+        <Box sx={{ my: 2, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
             {/* Слайдер для диапазона цен */}
             <Box sx={{ width: 250 }}>
                 <InputLabel>Цена</InputLabel>
